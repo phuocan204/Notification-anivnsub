@@ -15,51 +15,74 @@ if (fs.existsSync(processedAnimeMemoryFile)) {
 }
 
 async function fetchAnimeData(url) {
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        timeout: 0,
+    });
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-    const animes = await page.evaluate(() => {
-        const animeElements = document.querySelectorAll('.MovieList .TPostMv');
-        const animeList = [];
+    try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.waitForSelector('.MovieList .TPostMv');
 
-        animeElements.forEach(el => {
-            const title = el.querySelector('.Title')?.innerText.trim();
-            const episode = el.querySelector('.mli-eps i')?.innerText.trim();
-            const link = el.querySelector('a')?.href;
-            const image = el.querySelector('img')?.src;
-            const rating = el.querySelector('.anime-avg-user-rating')?.innerText.trim();
-            const genres = Array.from(el.querySelectorAll('.Genre a')).map(genre => genre.innerText.trim()).join(', ');
+        const animes = await page.evaluate(() => {
+            const animeElements = document.querySelectorAll('.MovieList .TPostMv');
+            const animeList = [];
 
-            if (title && episode && link) {
-                animeList.push({ title, episode, link, image, rating, genres });
-            }
+            animeElements.forEach(el => {
+                const title = el.querySelector('.Title')?.innerText.trim();
+                const episode = el.querySelector('.mli-eps i')?.innerText.trim();
+                const link = el.querySelector('a')?.href;
+                const image = el.querySelector('img')?.src;
+                const rating = el.querySelector('.anime-avg-user-rating')?.innerText.trim();
+                const genres = Array.from(el.querySelectorAll('.Genre a')).map(genre => genre.innerText.trim()).join(', ');
+
+                if (title && episode && link) {
+                    animeList.push({ title, episode, link, image, rating, genres });
+                }
+            });
+
+            return animeList;
         });
 
-        return animeList;
-    });
-
-    await browser.close();
-    return animes;
+        await browser.close();
+        return animes;
+    } catch (error) {
+        console.error('Lỗi khi tải dữ liệu:', error.message);
+        await browser.close();
+        return [];
+    }
 }
 
 async function fetchAnimeDescription(link) {
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        timeout: 0,
+    });
     const page = await browser.newPage();
-    await page.goto(link, { waitUntil: 'domcontentloaded' });
 
-    const description = await page.evaluate(() => {
-        const descElement = document.querySelector('.Description');
-        return descElement ? descElement.innerText.trim() : 'Không có gì.';
-    });
+    try {
+        await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    const backgroundImage = await page.evaluate(() => {
-        const imageElement = document.querySelector('.TPostBg.Objf img');
-        return imageElement ? imageElement.src : '';
-    });
+        const description = await page.evaluate(() => {
+            const descElement = document.querySelector('.Description');
+            return descElement ? descElement.innerText.trim() : 'Không có gì.';
+        });
 
-    await browser.close();
-    return { description, backgroundImage };
+        const backgroundImage = await page.evaluate(() => {
+            const imageElement = document.querySelector('.TPostBg.Objf img');
+            return imageElement ? imageElement.src : '';
+        });
+
+        await browser.close();
+        return { description, backgroundImage };
+    } catch (error) {
+        console.error('Lỗi khi lấy mô tả:', error.message);
+        await browser.close();
+        return { description: 'Không có gì.', backgroundImage: '' };
+    }
 }
 
 async function sendWebhook(anime) {
@@ -73,7 +96,7 @@ async function sendWebhook(anime) {
                     },
                     title: `${anime.title} (Tập ${anime.episode})`,
                     url: anime.link,
-                    description: `**Đánh giá:** ${anime.rating}\n**Thể loại:** ${anime.genres}\n\n**Giới thiệu:** ${anime.description}`,
+                    description: `**Đánh giá:** ${anime.rating || 'Chưa có'}\n**Thể loại:** ${anime.genres || 'Không rõ'}\n\n**Giới thiệu:** ${anime.description}`,
                     color: 0x1abc9c,
                     image: { url: anime.backgroundImage || anime.image },
                     thumbnail: { url: anime.image },
@@ -82,6 +105,7 @@ async function sendWebhook(anime) {
         };
 
         await axios.post(webhook_url, message, { headers: { 'Content-Type': 'application/json' } });
+        console.log(`Đã gửi thông báo: ${anime.title} (Tập ${anime.episode})`);
     } catch (error) {
         console.error('Lỗi khi gửi webhook:', error.message);
     }
@@ -98,7 +122,6 @@ async function checkAnimeUpdates(url) {
 
     const isProcessed = processedAnime.some(anime => anime.link === newAnime.link);
     if (!isProcessed) {
-
         const { description, backgroundImage } = await fetchAnimeDescription(newAnime.link);
         newAnime.description = description;
         newAnime.backgroundImage = backgroundImage;
@@ -106,7 +129,6 @@ async function checkAnimeUpdates(url) {
         await sendWebhook(newAnime);
 
         processedAnimeMemory[url] = [newAnime, ...processedAnime];
-
         if (processedAnimeMemory[url].length > MAX_ANIME_COUNT) {
             processedAnimeMemory[url] = processedAnimeMemory[url].slice(0, MAX_ANIME_COUNT);
         }
@@ -119,6 +141,6 @@ async function checkAnimeUpdates(url) {
     await checkAnimeUpdates(anime_url);
 
     setInterval(async () => {
-        await checkAnimeUpdates(anime_url); // Kiểm tra cập nhật
-    }, 5000);
+        await checkAnimeUpdates(anime_url);
+    }, 5000); // Kiểm tra cập nhật
 })();
