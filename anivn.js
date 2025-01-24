@@ -14,6 +14,10 @@ if (fs.existsSync(processedAnimeMemoryFile)) {
     processedAnimeMemory = JSON.parse(data);
 }
 
+function normalizeUrl(url) {
+    return url.split('?')[0];
+}
+
 async function fetchAnimeData(url) {
     const browser = await puppeteer.launch({
         headless: true,
@@ -48,8 +52,7 @@ async function fetchAnimeData(url) {
 
         await browser.close();
         return animes;
-    } catch (error) {
-        console.error('Lỗi khi tải dữ liệu:', error.message);
+    } catch {
         await browser.close();
         return [];
     }
@@ -68,7 +71,7 @@ async function fetchAnimeDescription(link) {
 
         const description = await page.evaluate(() => {
             const descElement = document.querySelector('.Description');
-            return descElement ? descElement.innerText.trim() : 'Không có gì.';
+            return descElement ? descElement.innerText.trim() : '';
         });
 
         const backgroundImage = await page.evaluate(() => {
@@ -78,10 +81,9 @@ async function fetchAnimeDescription(link) {
 
         await browser.close();
         return { description, backgroundImage };
-    } catch (error) {
-        console.error('Lỗi khi lấy mô tả:', error.message);
+    } catch {
         await browser.close();
-        return { description: 'Không có gì.', backgroundImage: '' };
+        return { description: '', backgroundImage: '' };
     }
 }
 
@@ -105,13 +107,10 @@ async function sendWebhook(anime) {
         };
 
         await axios.post(webhook_url, message, { headers: { 'Content-Type': 'application/json' } });
-        console.log(`Đã gửi thông báo: ${anime.title} (Tập ${anime.episode})`);
-    } catch (error) {
-        console.error('Lỗi khi gửi webhook:', error.message);
-    }
+    } catch {}
 }
 
-const MAX_ANIME_COUNT = 30; // Giới hạn lưu trữ
+const MAX_ANIME_COUNT = 30;
 
 async function checkAnimeUpdates(url) {
     const animes = await fetchAnimeData(url);
@@ -120,7 +119,13 @@ async function checkAnimeUpdates(url) {
     const processedAnime = processedAnimeMemory[url] || [];
     const newAnime = animes[0];
 
-    const isProcessed = processedAnime.some(anime => anime.link === newAnime.link);
+    const isProcessed = processedAnime.some(anime =>
+        normalizeUrl(anime.link) === normalizeUrl(newAnime.link) &&
+        anime.title === newAnime.title &&
+        anime.episode === newAnime.episode &&
+        anime.genres === newAnime.genres
+    );
+
     if (!isProcessed) {
         const { description, backgroundImage } = await fetchAnimeDescription(newAnime.link);
         newAnime.description = description;
@@ -142,5 +147,5 @@ async function checkAnimeUpdates(url) {
 
     setInterval(async () => {
         await checkAnimeUpdates(anime_url);
-    }, 5000); // Kiểm tra cập nhật
+    }, 5000);
 })();
